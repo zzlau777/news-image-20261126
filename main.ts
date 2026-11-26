@@ -27,10 +27,28 @@ if (payload.byteLength > 1_048_576) {
   throw new Error(`entry.png is ${payload.byteLength} bytes, over the 1 MiB cap`);
 }
 
+// The canvas must be exactly the competition's 1024x1024 frame. A PNG's
+// IHDR chunk stores width and height as big-endian uint32s at bytes
+// 16..24, right after the signature and the chunk header, so the audit
+// can read the dimensions straight from the payload bytes.
+const width = payload.readUInt32BE(16);
+const height = payload.readUInt32BE(20);
+if (width !== 1024 || height !== 1024) {
+  throw new Error(`entry.png is ${width}x${height}, not the required 1024x1024`);
+}
+
 const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
 mkdirSync(outDir, { recursive: true });
 const destPath = join(outDir, "entry.png");
 copyFileSync(srcPath, destPath);
 
 const digest = createHash("sha256").update(payload).digest("hex");
-console.log(`entry.png: ${payload.byteLength} bytes, sha256 ${digest} -> ${destPath}`);
+
+// Prove the copy landed whole: re-read what was written and compare its
+// digest with the audited source before declaring success.
+const written = readFileSync(destPath);
+const writtenDigest = createHash("sha256").update(written).digest("hex");
+if (writtenDigest !== digest) {
+  throw new Error(`copied entry.png sha256 ${writtenDigest} != source ${digest}`);
+}
+console.log(`entry.png: ${payload.byteLength} bytes, ${width}x${height}, sha256 ${digest} -> ${destPath}`);
